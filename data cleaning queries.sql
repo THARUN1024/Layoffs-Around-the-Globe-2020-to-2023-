@@ -1,3 +1,4 @@
+-- get every columns and rows in table data set.
 SELECT *
 FROM layoffs;
 
@@ -47,7 +48,7 @@ location text,
 SELECT *
 FROM layoffs_staging2;
 
--- INSERTING DATA INTO  TABLE--> layoffs_stagging2
+-- INSERTING DATA INTO  TABLE--> layoffs_staging2
 INSERT INTO layoffs_staging2
 SELECT *,
 ROW_NUMBER() OVER( PARTITION BY company, location, industry, total_laid_off,
@@ -75,7 +76,7 @@ FROM layoffs_staging2;
 
 -- STANDARDIZING  THE DATA--
 SELECT company, TRIM(company)
-FROM layoffs_stagging2;
+FROM layoffs_staging2;
 
 
 UPDATE layoffs_staging2
@@ -108,19 +109,17 @@ FROM layoffs_staging2;
 ALTER TABLE layoffs_staging2
 MODIFY COLUMN `date` DATE;   -- NOW it is converted into date 
 
-SELECT t1.industry, t2.industry
-FROM layoffs_staging2 t1
-JOIN layoffs_staging2 t2
-ON T1.company = t2.company
-WHERE (t1.industry IS NULL OR t1.industry = '')
-AND t2.industry IS NOT NULL;
-
-
-
 
 UPDATE layoffs_staging2
 SET industry = NULL
 WHERE industry = '';
+
+SELECT t1.industry, t2.industry
+FROM layoffs_staging2 t1
+JOIN layoffs_staging2 t2
+ON T1.company = t2.company
+WHERE t1.industry IS NULL
+AND t2.industry IS NOT NULL;
 
 UPDATE layoffs_staging2  t1
 JOIN layoffs_staging2 t2
@@ -200,7 +199,7 @@ ORDER BY 2 DESC
 
 SELECT industry, SUM(total_laid_off)
 FROM layoffs_staging2
-GROUP BY industry        -- it is nescessarry to put group by when we use aggregate function eg SUM, MAX, ETC
+GROUP BY industry        -- it is nescessarry to put group by when we use aggregate function eg SUM, MAX
 ORDER BY 2 DESC
 ;
 
