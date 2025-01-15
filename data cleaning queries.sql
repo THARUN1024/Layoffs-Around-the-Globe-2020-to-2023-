@@ -1,30 +1,29 @@
--- Retrieve all rows and columns from the 'layoffs' table to inspect the data
+-- Retrieve all rows and columns from the 'layoffs' table
 SELECT * 
 FROM layoffs;
 
--- Retrieve all rows and columns from the 'layoffs_staging' table for data analysis
+-- Fetch all rows from the 'layoffs_staging' table
 SELECT * 
 FROM layoffs_staging;
 
--- Identify potential duplicate rows based on several key columns using ROW_NUMBER() 
+-- Identify duplicates based on specific columns in 'layoffs_staging'
 SELECT *,
 ROW_NUMBER() OVER(PARTITION BY company, industry, total_laid_off, percentage_laid_off, `date`) AS duplicate_row_number
 FROM layoffs_staging;
 
--- Use a CTE to identify duplicates based on multiple columns (e.g., company, location, industry, etc.)
+-- Detect duplicates in 'layoffs_staging' by checking multiple columns
 WITH duplicates AS (
     SELECT *,
     ROW_NUMBER() OVER(PARTITION BY company, location, industry, total_laid_off, percentage_laid_off, `date`, stage, country, funds_raised_millions) AS duplicate_row_number
     FROM layoffs_staging
 )
--- Retrieve rows where the duplicate row number is greater than 1, indicating duplicate entries
 SELECT *
 FROM duplicates
 WHERE duplicate_row_number > 1;
 
--- Create a new table ('layoffs_staging_v2') with the same structure as 'layoffs_staging'
--- and an additional column for tracking row numbers of duplicate entries
-CREATE TABLE layoffs_staging_v2 (
+
+-- Create a new table with a similar structure to 'layoffs_staging', but rename it to 'layoffs_cleaned'
+CREATE TABLE layoffs_cleaned (
   company text,
   location text,
   industry text,
@@ -37,153 +36,165 @@ CREATE TABLE layoffs_staging_v2 (
   duplicate_row_number INT
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;
 
--- Verify the structure of the newly created table
-SELECT * FROM layoffs_staging_v2;
+-- Check the newly created table 'layoffs_cleaned'
+SELECT *
+FROM layoffs_cleaned;
 
--- Insert data from 'layoffs_staging' into 'layoffs_staging_v2', adding a row number to track duplicates
-INSERT INTO layoffs_staging_v2
+-- Insert data into the new table 'layoffs_cleaned' with row numbers to identify duplicates
+INSERT INTO layoffs_cleaned
 SELECT *,
 ROW_NUMBER() OVER(PARTITION BY company, location, industry, total_laid_off, percentage_laid_off, `date`, stage, country, funds_raised_millions) AS duplicate_row_number
 FROM layoffs_staging;
 
--- Delete rows from 'layoffs_staging_v2' where the duplicate row number is greater than 1, effectively removing duplicates
-DELETE
-FROM layoffs_staging_v2
+-- Check for duplicate rows in 'layoffs_cleaned'
+SELECT *
+FROM layoffs_cleaned
 WHERE duplicate_row_number > 1;
 
--- Verify that duplicates have been removed and the data is clean
+-- Remove duplicate rows from 'layoffs_cleaned'
+DELETE
+FROM layoffs_cleaned
+WHERE duplicate_row_number > 1;
+
+-- View the cleaned table after removing duplicates
 SELECT *
-FROM layoffs_staging_v2;
+FROM layoffs_cleaned;
 
 -- Standardize company names by trimming extra spaces
-UPDATE layoffs_staging_v2
+SELECT company, TRIM(company) AS company_trimmed
+FROM layoffs_cleaned;
+
+-- Update company names to remove any extra spaces
+UPDATE layoffs_cleaned
 SET company = TRIM(company);
 
--- Fix industry names starting with 'Crypto' by updating them to 'Crypto'
-UPDATE layoffs_staging_v2
+-- Update industry names that start with 'Crypto' to 'Crypto'
+UPDATE layoffs_cleaned
 SET industry = 'Crypto'
 WHERE industry LIKE 'Crypto%';
 
--- Standardize country names by trimming trailing periods (e.g., 'United States.' → 'United States')
-UPDATE layoffs_staging_v2
+-- Standardize country names by removing trailing periods (e.g., "United States.")
+UPDATE layoffs_cleaned
 SET country = TRIM(TRAILING '.' FROM country)
 WHERE country LIKE 'United States%';
 
--- Convert 'date' column to proper DATE format
-UPDATE layoffs_staging_v2
+-- Change date format to proper date format
+UPDATE layoffs_cleaned
 SET `date` = STR_TO_DATE(`date`, '%m/%d/%Y');
 
--- Alter the column type to ensure it is in DATE format
-ALTER TABLE layoffs_staging_v2
+-- Modify the 'date' column to have the correct DATE type
+ALTER TABLE layoffs_cleaned
 MODIFY COLUMN `date` DATE;
 
--- Update industry to NULL where it is empty (i.e., industry is an empty string)
-UPDATE layoffs_staging_v2
+-- Set empty industry values to NULL
+UPDATE layoffs_cleaned
 SET industry = NULL
 WHERE industry = '';
 
--- Fill NULL values in the 'industry' column by joining with the same table and matching on 'company'
-UPDATE layoffs_staging_v2 AS t1
-JOIN layoffs_staging_v2 AS t2
+-- Fill in missing industry values based on matching company data
+UPDATE layoffs_cleaned AS t1
+JOIN layoffs_cleaned AS t2
 ON t1.company = t2.company
 SET t1.industry = t2.industry
 WHERE t1.industry IS NULL
 AND t2.industry IS NOT NULL;
 
--- Remove rows where both total_laid_off and percentage_laid_off are NULL
+-- Delete rows where both total_laid_off and percentage_laid_off are NULL
 DELETE
-FROM layoffs_staging_v2
+FROM layoffs_cleaned
 WHERE total_laid_off IS NULL
 AND percentage_laid_off IS NULL;
 
--- Drop the 'duplicate_row_number' column as it is no longer needed
-ALTER TABLE layoffs_staging_v2
+-- Remove the 'duplicate_row_number' column from the table after cleaning
+ALTER TABLE layoffs_cleaned
 DROP COLUMN duplicate_row_number;
 
--- Group by country and calculate total layoffs and count of rows
+-- Perform Exploratory Data Analysis (EDA) to summarize the data
+
+-- Total layoffs and count by country
 SELECT country, SUM(total_laid_off) AS total_off, COUNT(total_laid_off)
-FROM layoffs_staging_v2
+FROM layoffs_cleaned
 GROUP BY country;
 
--- Count how many records have NULL in total_laid_off for the United States
+-- Count the number of rows with NULL total_laid_off for 'United States'
 SELECT COUNT(country)
-FROM layoffs_staging_v2
+FROM layoffs_cleaned
 WHERE country = 'United States'
 AND total_laid_off IS NULL;
 
--- Group by year and sum layoffs by year
+-- Total layoffs by year
 SELECT YEAR(`date`), SUM(total_laid_off) AS total_off
-FROM layoffs_staging_v2
+FROM layoffs_cleaned
 GROUP BY YEAR(`date`)
-ORDER BY total_off DESC;
+ORDER BY 2 DESC;
 
--- Total layoffs by company, ordered by the number of layoffs
+-- Total layoffs by company
 SELECT company, SUM(total_laid_off)
-FROM layoffs_staging_v2
+FROM layoffs_cleaned
 GROUP BY company
-ORDER BY total_laid_off DESC;
+ORDER BY 2 DESC;
 
--- Total layoffs by industry, ordered by the number of layoffs
+-- Total layoffs by industry
 SELECT industry, SUM(total_laid_off)
-FROM layoffs_staging_v2
+FROM layoffs_cleaned
 GROUP BY industry
-ORDER BY total_laid_off DESC;
+ORDER BY 2 DESC;
 
--- Total layoffs by country, ordered by the number of layoffs
+-- Total layoffs by country
 SELECT country, SUM(total_laid_off)
-FROM layoffs_staging_v2
+FROM layoffs_cleaned
 GROUP BY country
-ORDER BY total_laid_off DESC;
+ORDER BY 2 DESC;
 
--- Total layoffs by stage, ordered by the number of layoffs
+-- Total layoffs by stage (e.g., Pre-IPO, Post-IPO)
 SELECT stage, SUM(total_laid_off) AS total_off
-FROM layoffs_staging_v2
+FROM layoffs_cleaned
 GROUP BY stage
-ORDER BY total_off DESC;
+ORDER BY 2 DESC;
 
--- Total layoffs for companies in the 'Post-IPO' stage, ordered by the number of layoffs
+-- Total layoffs in 'Post-IPO' stage by company
 SELECT company, SUM(total_laid_off)
-FROM layoffs_staging_v2
+FROM layoffs_cleaned
 WHERE stage = 'Post-IPO'
 GROUP BY company
-ORDER BY total_laid_off DESC;
+ORDER BY 2 DESC;
 
--- Summing layoffs by month (extracting month and year from date)
+-- Total layoffs by month (year-month)
 SELECT SUBSTRING(`date`, 1, 7) AS `month`, SUM(total_laid_off)
-FROM layoffs_staging_v2
+FROM layoffs_cleaned
 WHERE SUBSTRING(`date`, 1, 7) IS NOT NULL
 GROUP BY `month`
-ORDER BY `month`;
+ORDER BY 1;
 
 -- Rolling total of layoffs by month
 WITH rolling_total AS (
     SELECT SUBSTRING(`date`, 1, 7) AS `month`, SUM(total_laid_off) AS total_off
-    FROM layoffs_staging_v2
+    FROM layoffs_cleaned
     WHERE SUBSTRING(`date`, 1, 7) IS NOT NULL
     GROUP BY `month`
-    ORDER BY `month`
+    ORDER BY 1
 )
 SELECT `month`, SUM(total_off) OVER (ORDER BY `month`) AS rolling_total
 FROM rolling_total;
 
--- Layoffs analysis by year for each company
+-- Yearly layoffs by company, ordered by total layoffs
 SELECT company, YEAR(`date`), SUM(total_laid_off)
-FROM layoffs_staging_v2
+FROM layoffs_cleaned
 GROUP BY company, YEAR(`date`)
-ORDER BY total_laid_off DESC;
+ORDER BY 3 DESC;
 
--- Ranking companies by layoffs per year and fetching top 5
+-- Top 5 companies with the most layoffs per year
 WITH company_year AS (
-    SELECT company, YEAR(`date`) AS year, SUM(total_laid_off) AS total_laid_off
-    FROM layoffs_staging_v2
+    SELECT company, YEAR(`date`), SUM(total_laid_off)
+    FROM layoffs_cleaned
     GROUP BY company, YEAR(`date`)
 ), company_year_rank AS (
     SELECT *,
-    DENSE_RANK() OVER(PARTITION BY year ORDER BY total_laid_off DESC) AS ranking
+    DENSE_RANK() OVER(PARTITION BY YEAR ORDER BY total_laid_off DESC) AS rank
     FROM company_year
-    WHERE year IS NOT NULL
+    WHERE YEAR IS NOT NULL
 )
 SELECT *
 FROM company_year_rank
-WHERE ranking <= 5;
-
+WHERE rank <= 5;
+ 
